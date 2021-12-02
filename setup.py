@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """# Environment Modules
 
 The Environment Modules package provides for the dynamic modification of a
@@ -16,6 +16,7 @@ from setuptools.command.sdist import sdist as orig_sdist
 from setuptools.command.install import install as orig_install
 from distutils.core import Command
 from distutils.command.build import build as orig_build
+from distutils.command.bdist import bdist as orig_bdist
 
 
 # ############# NOTES #####################
@@ -53,6 +54,25 @@ class sdist(orig_sdist):
     def run(self):
         self.run_command("fetch_sources")
         return orig_sdist.run(self)
+
+
+def repeatable_hash(obj):
+    obj = str(obj).encode("latin1")
+    import hashlib
+
+    return hashlib.sha1(obj).hexdigest()
+
+
+class bdist(orig_bdist):
+    prefix = None
+
+    def finalize_options(self):
+        super(bdist, self).finalize_options()
+        self.set_undefined_options("install", ("prefix", "prefix"))
+        # append a random number to the "platform" that varies with the install
+        # destination; this forces pip to (correctly) not use cached wheels for
+        # this package.
+        self.plat_name += "-" + repeatable_hash(self.prefix)
 
 
 class fetch_sources(Command):
@@ -111,39 +131,27 @@ class install_cexe(Command):
         return self.outfiles
 
 
+from wheel.bdist_wheel import bdist_wheel as orig_bdist_wheel
+
+
+class bdist_wheel(orig_bdist_wheel):
+    def get_tag(self):
+        # no python implementation
+        # no python ABI
+        # just platform
+        return "none", "none", self.plat_name
+
+
 command_overrides = {
     "sdist": sdist,
+    "bdist": bdist,
+    "bdist_wheel": bdist_wheel,
     "fetch_sources": fetch_sources,
     "build": build,
     "build_cexe": build_cexe,
     "install": install,
     "install_cexe": install_cexe,
 }
-
-
-def wheel_support():
-    class bdist_wheel(orig_bdist_wheel):
-        def finalize_options(self):
-            orig_bdist_wheel.finalize_options(self)
-            # Mark us as not a pure python package
-            self.root_is_pure = False
-
-        def get_tag(self):
-            python, abi, plat = orig_bdist_wheel.get_tag(self)
-            # We don't contain any python source, nor any python extensions
-            python, abi = "py2.py3", "none"
-            return python, abi, plat
-
-    command_overrides["bdist_wheel"] = bdist_wheel
-
-
-try:
-    from wheel.bdist_wheel import bdist_wheel as orig_bdist_wheel
-except ImportError:
-    pass
-else:
-    # wheel_support()
-    pass
 
 
 import versions
